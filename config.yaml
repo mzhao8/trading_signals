@@ -1,0 +1,73 @@
+# Trading Signals Configuration
+
+# Symbols to track (Binance format)
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+
+# Available timeframes: 1m, 5m, 15m, 1h, 4h, 1d, 1w
+timeframes:
+  - 4h
+  - 1d
+
+# Number of candles to fetch for analysis
+lookback_periods: 200
+
+# Technical indicator settings
+indicators:
+  rsi:
+    period: 14
+    oversold: 30
+    overbought: 70
+
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+
+  bollinger:
+    period: 20
+    std_dev: 2.0
+
+  ema:
+    fast: 9
+    slow: 21
+
+# Signal scoring weights (must sum to 1.0)
+signal_weights:
+  rsi: 0.25
+  macd: 0.25
+  bollinger: 0.25
+  ema: 0.25
+
+# Alert thresholds
+alerts:
+  # Only alert when score exceeds these values
+  strong_buy_threshold: 60
+  strong_sell_threshold: -60
+
+  # Rate limiting (seconds between alerts for same symbol)
+  cooldown_seconds: 3600
+
+# Notification settings (fill in to enable)
+notifications:
+  discord:
+    enabled: false
+    webhook_url: ""
+
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+
+# Cache settings
+cache:
+  enabled: true
+  directory: "data"
+  max_age_hours: 1
+
+# API settings
+api:
+  binance:
+    base_url: "https://api.binance.com"
+    rate_limit_per_minute: 1200
