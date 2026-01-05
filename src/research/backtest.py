@@ -53,7 +53,9 @@ class BacktestResult:
     @property
     def total_return(self) -> float:
         """Total return as a percentage."""
-        return ((self.final_capital - self.initial_capital) / self.initial_capital) * 100
+        return (
+            (self.final_capital - self.initial_capital) / self.initial_capital
+        ) * 100
 
     @property
     def total_trades(self) -> int:
@@ -77,13 +79,17 @@ class BacktestResult:
     @property
     def avg_win(self) -> float:
         """Average winning trade PnL percentage."""
-        wins = [t.pnl_percent for t in self.trades if t.pnl_percent and t.pnl_percent > 0]
+        wins = [
+            t.pnl_percent for t in self.trades if t.pnl_percent and t.pnl_percent > 0
+        ]
         return sum(wins) / len(wins) if wins else 0.0
 
     @property
     def avg_loss(self) -> float:
         """Average losing trade PnL percentage."""
-        losses = [t.pnl_percent for t in self.trades if t.pnl_percent and t.pnl_percent < 0]
+        losses = [
+            t.pnl_percent for t in self.trades if t.pnl_percent and t.pnl_percent < 0
+        ]
         return sum(losses) / len(losses) if losses else 0.0
 
     @property
@@ -151,11 +157,35 @@ STRATEGY_PRESETS: dict[str, dict] = {
         "long_entry_score": 60.0,
         "long_exit_score": -60.0,
     },
+    "long_moderate_signals": {
+        "description": "Long only on BUY signals, exit on SELL",
+        "mode": "long_only",
+        "long_entry_score": 30.0,
+        "long_exit_score": -30.0,
+    },
+    "long_any_signals": {
+        "description": "Long on any bullish signal, exit on bearish",
+        "mode": "long_only",
+        "long_entry_score": 15.0,
+        "long_exit_score": -15.0,
+    },
     "short_strong_signals": {
         "description": "Short only on STRONG_SELL, exit on STRONG_BUY",
         "mode": "short_only",
         "short_entry_score": -60.0,
         "short_exit_score": 60.0,
+    },
+    "short_moderate_signals": {
+        "description": "Short only on SELL signals, exit on BUY",
+        "mode": "short_only",
+        "short_entry_score": -30.0,
+        "short_exit_score": 30.0,
+    },
+    "short_any_signals": {
+        "description": "Short on any bearish signal, exit on bullish",
+        "mode": "short_only",
+        "short_entry_score": -15.0,
+        "short_exit_score": 15.0,
     },
     "bidirectional_strong": {
         "description": "Both directions, strong signals only",
@@ -164,6 +194,14 @@ STRATEGY_PRESETS: dict[str, dict] = {
         "short_entry_score": -60.0,
         "long_exit_score": -60.0,
         "short_exit_score": 60.0,
+    },
+    "bidirectional_moderate": {
+        "description": "Both directions, moderate signals",
+        "mode": "bidirectional",
+        "long_entry_score": 30.0,
+        "short_entry_score": -30.0,
+        "long_exit_score": -30.0,
+        "short_exit_score": 30.0,
     },
     "trend_following": {
         "description": "Enter on any buy/sell, hold until opposite",

@@ -5,10 +5,12 @@ A Python-based cryptocurrency trading signals application that combines technica
 ## Features
 
 - **Technical Indicators**: RSI, MACD, Bollinger Bands, EMA Crossovers
-- **Signal Aggregation**: Weighted scoring system (-100 to +100)
+- **On-Chain Metrics**: Exchange flows, MVRV Z-Score, SOPR, Active Addresses (BTC/ETH via Glassnode)
+- **Market Regime Detection**: Auto-detect bull/bear/sideways markets
+- **Signal Aggregation**: Regime-aware weighted scoring system (-100 to +100)
 - **Multi-Exchange Support**: Uses CCXT for reliable data from multiple exchanges
 - **CLI Dashboard**: Rich terminal interface for viewing signals
-- **Backtesting**: Validate strategies against historical data
+- **Backtesting**: Validate strategies against historical data with AI analysis
 - **Notifications**: Discord and Telegram alerts (optional)
 
 ## Quick Start
@@ -94,6 +96,51 @@ python -m src.product.cli detail BTCUSDT --timeframe 4h
 │ EMA (9/21)   │ 88091.22 / 88081.73 │         +0.2 │ Bullish        │
 └──────────────┴─────────────────────┴──────────────┴────────────────┘
 ```
+
+For BTC/ETH, the detail command also shows on-chain metrics from Glassnode:
+
+```bash
+# Requires GLASSNODE_API_KEY in .env
+python -m src.product.cli detail BTCUSDT --timeframe 1d
+```
+
+### Aggregated Multi-Source Signal
+
+Get a combined signal from multiple sources (technical + on-chain) with automatic market regime detection:
+
+```bash
+# Full aggregated analysis for BTC
+python -m src.product.cli aggregate BTCUSDT --timeframe 1d
+
+# Disable regime detection (use default weights)
+python -m src.product.cli aggregate BTCUSDT --no-regime
+```
+
+**Output:**
+
+```
+╭────────────────────────────── Regime Detection ──────────────────────────────╮
+│  Market Regime: ↔️ SIDEWAYS                                                   │
+│     Confidence: 72%                                                          │
+│ Trend Strength: +10.7                                                        │
+│     Volatility: 12% (percentile)                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+                   Signal Sources
+┏━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┓
+┃ Source    ┃ Score ┃ Weight ┃ Weighted ┃ Status   ┃
+┡━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━┩
+│ Technical │ -29.1 │   0.45 │    -13.1 │ ✓ active │
+│ Onchain   │ +21.1 │   0.15 │     +3.2 │ ✓ active │
+└───────────┴───────┴────────┴──────────┴──────────┘
+
+╭─────────────────────── 📊 Aggregated Signal: BTCUSDT ────────────────────────╮
+│  Direction: NEUTRAL                                                          │
+│      Score: -16.5                                                            │
+│ Confidence: 75%                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Note:** On-chain signals are only available for BTC and ETH. Other symbols will use technical analysis only.
 
 ### Watch Mode
 
@@ -263,6 +310,22 @@ The system generates a score from -100 to +100:
 2. **MACD (12/26/9)**: Trend momentum - Positive histogram is bullish
 3. **Bollinger Bands (20, 2)**: Volatility - Price at lower band is bullish
 4. **EMA Crossover (9/21)**: Trend direction - Fast above slow is bullish
+
+## API Keys Setup
+
+Create a `.env` file in the project root for API keys:
+
+```bash
+# Required for on-chain metrics (BTC/ETH)
+GLASSNODE_API_KEY=your_glassnode_api_key
+
+# Optional: For AI-powered backtest analysis
+ANTHROPIC_API_KEY=your_anthropic_api_key
+```
+
+**Glassnode** provides institutional-grade on-chain data. Sign up at https://studio.glassnode.com/
+
+The `.env` file is git-ignored for security.
 
 ## Configuration
 

@@ -3,6 +3,10 @@
 from datetime import datetime
 from typing import Optional
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 import typer
 from rich.console import Console
 from rich.live import Live
@@ -13,6 +17,8 @@ from rich.text import Text
 from src.data.cache import DataCache
 from src.data.fetcher import CCXTFetcher
 from src.research.backtest import Backtester, STRATEGY_PRESETS
+from src.research.indicators import calculate_indicators
+from src.research.analysis import analyze_backtest
 from src.research.reports import generate_backtest_report
 from src.research.signals import generate_signals
 from src.shared.config import get_config, load_config
@@ -169,9 +175,18 @@ def detail(
     timeframe: str = typer.Option(
         "4h", "--timeframe", "-t", help="Timeframe to analyze"
     ),
+    onchain: bool = typer.Option(
+        True,
+        "--onchain/--no-onchain",
+        help="Include on-chain metrics (BTC/ETH only)",
+    ),
 ):
     """Get detailed signal analysis for a single symbol."""
+    from src.research.onchain import GlassnodeSignalSource
+
     config = get_config()
+    onchain_signal = None
+    onchain_available = False
 
     with CCXTFetcher() as fetcher:
         cache = DataCache()
@@ -180,14 +195,74 @@ def detail(
             df = cache.get_or_fetch(fetcher, symbol, timeframe, config.lookback_periods)
             result = generate_signals(df, symbol, timeframe)
 
-    # Print signal card
-    card = format_signal_card(result.signal)
-    console.print(card)
+            # Fetch on-chain data if available (BTC/ETH only)
+            if onchain:
+                onchain_source = GlassnodeSignalSource()
+                if onchain_source.is_available(symbol):
+                    try:
+                        onchain_signal = onchain_source.calculate(symbol, timeframe)
+                        if onchain_signal.confidence > 0:
+                            onchain_available = True
+                    except Exception:
+                        pass
 
-    # Print indicator details
+    # Calculate scores
+    tech_score = result.signal.score
+    if onchain_available and onchain_signal:
+        onchain_score = onchain_signal.score
+        combined_score = (tech_score * 0.6) + (onchain_score * 0.4)
+    else:
+        onchain_score = None
+        combined_score = tech_score
+
+    # Determine direction from combined score
+    if combined_score >= 60:
+        direction = "STRONG BUY"
+        direction_style = "bold green"
+    elif combined_score >= 20:
+        direction = "BUY"
+        direction_style = "green"
+    elif combined_score <= -60:
+        direction = "STRONG SELL"
+        direction_style = "bold red"
+    elif combined_score <= -20:
+        direction = "SELL"
+        direction_style = "red"
+    else:
+        direction = "NEUTRAL"
+        direction_style = "yellow"
+
+    # Build main signal card with COMBINED score
+    score_color = get_score_color(combined_score)
     ind = result.signal.indicators
 
-    indicator_table = Table(title="Indicator Details", show_header=True)
+    # Header with combined score
+    header_grid = Table.grid(padding=0)
+    header_grid.add_column(justify="left")
+    header_grid.add_row(f"[{direction_style}]{direction}[/]  Score: [{score_color}]{combined_score:+.1f}[/]")
+    header_grid.add_row("")
+    header_grid.add_row(f"Price: ${result.signal.price:,.2f}")
+    header_grid.add_row(f"Confidence: {int(result.signal.confidence * 100)}%")
+    header_grid.add_row(f"Time: {result.signal.timestamp.strftime('%Y-%m-%d %H:%M')} UTC")
+
+    # Score breakdown line
+    if onchain_available:
+        header_grid.add_row("")
+        header_grid.add_row(
+            f"[dim]Technical:[/dim] [{get_score_color(tech_score)}]{tech_score:+.1f}[/]  "
+            f"[dim]On-Chain:[/dim] [{get_score_color(onchain_score)}]{onchain_score:+.1f}[/]"
+        )
+
+    console.print(
+        Panel(
+            header_grid,
+            title=f"{symbol} ({timeframe})",
+            border_style=score_color,
+        )
+    )
+
+    # Technical indicators table
+    indicator_table = Table(title="Technical Indicators", show_header=True)
     indicator_table.add_column("Indicator")
     indicator_table.add_column("Value", justify="right")
     indicator_table.add_column("Signal Score", justify="right")
@@ -243,6 +318,217 @@ def detail(
 
     console.print(indicator_table)
 
+    # On-chain metrics table (if available)
+    if onchain_available and onchain_signal:
+        onchain_table = Table(
+            title="On-Chain Metrics (Glassnode)", show_header=True
+        )
+        onchain_table.add_column("Metric")
+        onchain_table.add_column("Value", justify="right")
+        onchain_table.add_column("Signal Score", justify="right")
+        onchain_table.add_column("Interpretation")
+
+        raw_metrics = onchain_signal.metadata.get("raw_metrics", {})
+
+        # Exchange Net Flow
+        if "exchange_net_flow" in onchain_signal.components:
+            flow = raw_metrics.get("exchange_net_flow", 0)
+            score = onchain_signal.components["exchange_net_flow"]
+            interp = "Bullish (outflow)" if flow < 0 else "Bearish (inflow)"
+            onchain_table.add_row(
+                "Exchange Net Flow",
+                f"{flow:,.0f} BTC",
+                f"{score:+.1f}",
+                interp,
+            )
+
+        # MVRV Z-Score
+        if "mvrv_z_score" in onchain_signal.components:
+            mvrv = raw_metrics.get("mvrv_z_score", 0)
+            score = onchain_signal.components["mvrv_z_score"]
+            if mvrv < 0:
+                interp = "Undervalued"
+            elif mvrv < 2:
+                interp = "Fair value"
+            elif mvrv < 4:
+                interp = "Overvalued"
+            else:
+                interp = "Extremely overvalued"
+            onchain_table.add_row(
+                "MVRV Z-Score",
+                f"{mvrv:.2f}",
+                f"{score:+.1f}",
+                interp,
+            )
+
+        # SOPR
+        if "sopr" in onchain_signal.components:
+            sopr = raw_metrics.get("sopr", 1)
+            score = onchain_signal.components["sopr"]
+            if sopr < 1:
+                interp = "Selling at loss (capitulation)"
+            else:
+                interp = "Selling at profit"
+            onchain_table.add_row(
+                "SOPR",
+                f"{sopr:.4f}",
+                f"{score:+.1f}",
+                interp,
+            )
+
+        # Active Addresses
+        if "active_addresses" in onchain_signal.components:
+            addrs = raw_metrics.get("active_addresses", 0)
+            score = onchain_signal.components["active_addresses"]
+            onchain_table.add_row(
+                "Active Addresses",
+                f"{addrs:,.0f}",
+                f"{score:+.1f}",
+                "Network activity",
+            )
+
+        # NUPL (if available in raw metrics)
+        if "nupl" in raw_metrics:
+            nupl = raw_metrics.get("nupl", 0)
+            if nupl < 0:
+                interp = "Capitulation"
+            elif nupl < 0.25:
+                interp = "Hope/Fear"
+            elif nupl < 0.5:
+                interp = "Optimism"
+            elif nupl < 0.75:
+                interp = "Belief/Greed"
+            else:
+                interp = "Euphoria"
+            onchain_table.add_row(
+                "NUPL",
+                f"{nupl:.4f}",
+                "[dim]n/a[/dim]",
+                interp,
+            )
+
+        console.print()
+        console.print(onchain_table)
+    elif onchain and not onchain_available:
+        # Check if it's because the symbol isn't supported
+        onchain_source = GlassnodeSignalSource()
+        if not onchain_source.is_available(symbol):
+            console.print(
+                f"\n[dim]On-chain metrics not available for {symbol} (BTC/ETH only)[/dim]"
+            )
+        else:
+            console.print(
+                "\n[yellow]On-chain data unavailable or error occurred[/yellow]"
+            )
+
+
+@app.command()
+def aggregate(
+    symbol: str = typer.Argument("BTCUSDT", help="Symbol to analyze (e.g., BTCUSDT)"),
+    timeframe: str = typer.Option("1d", "--timeframe", "-t", help="Timeframe"),
+    regime: bool = typer.Option(
+        True, "--regime/--no-regime", help="Auto-detect market regime"
+    ),
+):
+    """Get multi-source aggregated signal with regime detection.
+
+    Combines technical indicators with on-chain metrics (BTC/ETH) using
+    regime-aware weighting. Shows breakdown of each signal source.
+    """
+    from src.research.aggregator import create_default_aggregator
+    from src.research.regime import get_regime_emoji, get_regime_color
+
+    config = get_config()
+
+    with CCXTFetcher() as fetcher:
+        cache = DataCache()
+
+        with console.status(f"Analyzing {symbol} {timeframe}..."):
+            df = cache.get_or_fetch(fetcher, symbol, timeframe, config.lookback_periods)
+
+            # Create aggregator with optional on-chain
+            aggregator = create_default_aggregator(include_onchain=True)
+            aggregator.auto_detect_regime = regime
+
+            result = aggregator.aggregate(symbol, timeframe, df)
+
+    # Regime panel
+    regime_result = result.regime
+    regime_emoji = get_regime_emoji(regime_result.regime)
+    regime_color = get_regime_color(regime_result.regime)
+
+    regime_grid = Table.grid(padding=1)
+    regime_grid.add_column(justify="right", style="dim")
+    regime_grid.add_column(justify="left")
+    regime_grid.add_row("Market Regime:", f"[bold {regime_color}]{regime_emoji} {regime_result.regime.value.upper()}[/]")
+    regime_grid.add_row("Confidence:", f"{regime_result.confidence:.0%}")
+    regime_grid.add_row("Trend Strength:", f"{regime_result.trend_strength:+.1f}")
+    regime_grid.add_row("Volatility:", f"{regime_result.volatility:.0%} (percentile)")
+
+    console.print(Panel(regime_grid, title="Regime Detection", border_style="cyan"))
+
+    # Source signals table
+    source_table = Table(title="Signal Sources", show_header=True)
+    source_table.add_column("Source")
+    source_table.add_column("Score", justify="right")
+    source_table.add_column("Weight", justify="right")
+    source_table.add_column("Weighted", justify="right")
+    source_table.add_column("Status")
+
+    for source_name, signal in result.sources.items():
+        weight = result.weights_used.get(source_name, 0)
+        weighted = signal.score * weight if signal.confidence > 0 else 0
+
+        if signal.confidence == 0:
+            status = "[red]✗ unavailable[/red]"
+            score_str = "[dim]n/a[/dim]"
+            weight_str = "[dim]n/a[/dim]"
+            weighted_str = "[dim]n/a[/dim]"
+        else:
+            status = "[green]✓ active[/green]"
+            score_str = f"[{get_score_color(signal.score)}]{signal.score:+.1f}[/]"
+            weight_str = f"{weight:.2f}"
+            weighted_str = f"[{get_score_color(weighted)}]{weighted:+.1f}[/]"
+
+        source_table.add_row(
+            source_name.title(),
+            score_str,
+            weight_str,
+            weighted_str,
+            status,
+        )
+
+    console.print(source_table)
+
+    # Final signal panel
+    score_color = get_score_color(result.score)
+    direction_style = {
+        "STRONG_BUY": "bold green",
+        "BUY": "green",
+        "NEUTRAL": "yellow",
+        "SELL": "red",
+        "STRONG_SELL": "bold red",
+    }.get(result.direction, "white")
+
+    signal_grid = Table.grid(padding=1)
+    signal_grid.add_column(justify="right", style="dim")
+    signal_grid.add_column(justify="left")
+    signal_grid.add_row(
+        "Direction:",
+        f"[{direction_style}]{result.direction.replace('_', ' ')}[/]"
+    )
+    signal_grid.add_row("Score:", f"[bold {score_color}]{result.score:+.1f}[/]")
+    signal_grid.add_row("Confidence:", f"{result.confidence:.0%}")
+
+    console.print()
+    console.print(
+        Panel(
+            signal_grid,
+            title=f"📊 Aggregated Signal: {symbol}",
+            border_style=score_color,
+        )
+    )
+
 
 @app.command()
 def watch(
@@ -253,10 +539,21 @@ def watch(
     ),
 ):
     """Watch signals in real-time with auto-refresh."""
+    import signal
     import time
 
     config = get_config()
     symbols = symbol if symbol else config.symbols
+
+    # Flag to handle graceful shutdown
+    stop_watching = False
+
+    def handle_interrupt(signum, frame):
+        nonlocal stop_watching
+        stop_watching = True
+
+    # Register signal handler for Ctrl+C
+    original_handler = signal.signal(signal.SIGINT, handle_interrupt)
 
     console.print(f"[bold]Watching {', '.join(symbols)} on {timeframe}[/bold]")
     console.print(
@@ -264,7 +561,7 @@ def watch(
     )
 
     try:
-        while True:
+        while not stop_watching:
             with CCXTFetcher() as fetcher:
                 cache = DataCache()
 
@@ -276,6 +573,8 @@ def watch(
                 table.add_column("Updated")
 
                 for sym in symbols:
+                    if stop_watching:
+                        break
                     try:
                         # Force fresh fetch by invalidating cache
                         cache.invalidate(sym, timeframe)
@@ -303,15 +602,22 @@ def watch(
                     except Exception as e:
                         table.add_row(sym, "[red]ERROR[/red]", str(e)[:20], "", "")
 
-                console.clear()
-                console.print(table)
-                console.print(
-                    f"\n[dim]Next refresh in {interval}s. Ctrl+C to stop.[/dim]"
-                )
+                if not stop_watching:
+                    console.clear()
+                    console.print(table)
+                    console.print(
+                        f"\n[dim]Next refresh in {interval}s. Ctrl+C to stop.[/dim]"
+                    )
 
-            time.sleep(interval)
+            # Interruptible sleep - check every second
+            for _ in range(interval):
+                if stop_watching:
+                    break
+                time.sleep(1)
 
-    except KeyboardInterrupt:
+    finally:
+        # Restore original signal handler
+        signal.signal(signal.SIGINT, original_handler)
         console.print("\n[yellow]Stopped watching.[/yellow]")
 
 
@@ -359,6 +665,15 @@ def backtest(
     exit_on_opposite: bool = typer.Option(
         False, "--exit-opposite", help="Exit on any opposite signal"
     ),
+    analyze: bool = typer.Option(
+        True,
+        "--analyze/--no-analyze",
+        "-a",
+        help="Show strategy analysis and recommendations",
+    ),
+    ai: bool = typer.Option(
+        False, "--ai", help="Include AI-powered commentary (requires ANTHROPIC_API_KEY)"
+    ),
 ):
     """Run backtest on historical data.
 
@@ -372,8 +687,12 @@ def backtest(
 
         # Compare strategies
         backtest BTCUSDT --compare long_strong_signals,trend_following
+
+        # Skip analysis
+        backtest BTCUSDT --strategy trend_following --no-analyze
     """
     from pathlib import Path
+    import pandas as pd
 
     # Handle --list-strategies
     if list_strategies:
@@ -445,6 +764,43 @@ def backtest(
 
     # Print summary
     _print_backtest_result(result)
+
+    # Run analysis if requested
+    if analyze:
+        with console.status("Analyzing strategy performance..."):
+            # Calculate indicators and scores for analysis
+            df_ind = calculate_indicators(df)
+            scores = _calculate_scores_series(df_ind)
+
+            # Determine strategy mode
+            strategy_mode = mode or backtester.mode.value
+
+            analysis = analyze_backtest(result, df, scores, strategy_mode)
+
+        _print_analysis(analysis)
+
+        # LLM analysis if requested
+        if ai:
+            from src.research.llm_analysis import (
+                get_llm_commentary,
+                format_llm_commentary,
+            )
+
+            with console.status("[cyan]Getting AI analysis...[/cyan]"):
+                commentary = get_llm_commentary(result, analysis)
+
+            if commentary:
+                console.print("\n[bold]🤖 AI Analysis:[/bold]")
+                console.print(
+                    Panel(
+                        format_llm_commentary(commentary),
+                        border_style="cyan",
+                    )
+                )
+            else:
+                console.print(
+                    "\n[dim]AI analysis unavailable. Set ANTHROPIC_API_KEY environment variable.[/dim]"
+                )
 
     if output:
         output_path = Path(output)
@@ -542,7 +898,10 @@ def _compare_strategies(symbol: str, timeframe: str, days: int, strategies: list
         values = [metric_fn(r) for r in results]
         # Highlight best value for return and Sharpe
         if metric_name in ("Total Return", "Sharpe Ratio"):
-            numeric_vals = [r.total_return if metric_name == "Total Return" else r.sharpe_ratio() for r in results]
+            numeric_vals = [
+                r.total_return if metric_name == "Total Return" else r.sharpe_ratio()
+                for r in results
+            ]
             best_idx = numeric_vals.index(max(numeric_vals))
             values[best_idx] = f"[bold green]{values[best_idx]}[/bold green]"
         table.add_row(metric_name, *values)
@@ -562,9 +921,7 @@ def _print_backtest_result(result):
 
     return_style = "green" if result.total_return > 0 else "red"
 
-    summary_table.add_row(
-        "Strategy", result.strategy_name
-    )
+    summary_table.add_row("Strategy", result.strategy_name)
     summary_table.add_row(
         "Period", f"{result.start_date.date()} to {result.end_date.date()}"
     )
@@ -581,6 +938,235 @@ def _print_backtest_result(result):
     summary_table.add_row("Sharpe Ratio", f"{result.sharpe_ratio():.2f}")
 
     console.print(summary_table)
+
+
+def _calculate_scores_series(df: "pd.DataFrame") -> "pd.Series":
+    """Calculate aggregate signal scores for each row.
+
+    Args:
+        df: DataFrame with indicator columns.
+
+    Returns:
+        Series of signal scores.
+    """
+    import pandas as pd
+
+    scores = []
+    for i in range(len(df)):
+        row = df.iloc[i]
+        s = []
+        w = []
+
+        if pd.notna(row.get("rsi_signal")):
+            s.append(row["rsi_signal"])
+            w.append(0.25)
+        if pd.notna(row.get("macd_score")):
+            s.append(row["macd_score"])
+            w.append(0.25)
+        if pd.notna(row.get("bb_score")):
+            s.append(row["bb_score"])
+            w.append(0.25)
+        if pd.notna(row.get("ema_score")):
+            s.append(row["ema_score"])
+            w.append(0.25)
+
+        if s:
+            score = sum(x * y for x, y in zip(s, w)) / sum(w)
+        else:
+            score = 0.0
+        scores.append(score)
+
+    return pd.Series(scores, index=df.index)
+
+
+def _print_analysis(analysis: "BacktestAnalysis"):
+    """Print the backtest analysis report.
+
+    Args:
+        analysis: BacktestAnalysis object.
+    """
+    from src.research.analysis import PerformanceGrade, MarketRegime
+
+    console.print()
+
+    # Grade styling
+    grade_styles = {
+        PerformanceGrade.EXCELLENT: ("bold green", "✅"),
+        PerformanceGrade.GOOD: ("green", "👍"),
+        PerformanceGrade.FAIR: ("yellow", "➖"),
+        PerformanceGrade.POOR: ("red", "⚠️"),
+        PerformanceGrade.VERY_POOR: ("bold red", "❌"),
+    }
+
+    grade_style, grade_icon = grade_styles.get(analysis.grade, ("white", ""))
+
+    # Main analysis panel
+    grade_text = Text()
+    grade_text.append(f"Performance Grade: ", style="bold")
+    grade_text.append(
+        f"{analysis.grade.value.upper()} {grade_icon}",
+        style=grade_style,
+    )
+    grade_text.append(f"\n{analysis.grade_rationale}")
+
+    console.print(
+        Panel(
+            grade_text,
+            title="[bold]Strategy Analysis[/bold]",
+            border_style="cyan",
+        )
+    )
+
+    # Buy and hold comparison
+    bh = analysis.buy_hold
+    bh_table = Table(show_header=False, box=None, padding=(0, 2))
+    bh_table.add_column("Metric", style="dim")
+    bh_table.add_column("Value")
+
+    bh_style = "green" if bh.beat_benchmark else "red"
+    bh_table.add_row("Buy & Hold Return", f"{bh.buy_hold_return:+.2f}%")
+    bh_table.add_row("Strategy Return", f"{bh.strategy_return:+.2f}%")
+    bh_table.add_row(
+        "Outperformance",
+        Text(f"{bh.outperformance:+.2f}%", style=bh_style),
+    )
+
+    console.print(
+        Panel(
+            bh_table,
+            title="[bold]vs Buy & Hold[/bold]",
+            border_style="blue",
+        )
+    )
+
+    # Market regime
+    regime = analysis.regime
+    regime_styles = {
+        MarketRegime.STRONG_BULL: ("bold green", "🚀"),
+        MarketRegime.BULL: ("green", "📈"),
+        MarketRegime.SIDEWAYS: ("yellow", "➡️"),
+        MarketRegime.BEAR: ("red", "📉"),
+        MarketRegime.STRONG_BEAR: ("bold red", "💥"),
+    }
+    regime_style, regime_icon = regime_styles.get(regime.regime, ("white", ""))
+
+    regime_text = Text()
+    regime_text.append(f"Market Regime: ", style="bold")
+    regime_text.append(
+        f"{regime.regime.value.replace('_', ' ').upper()} {regime_icon}",
+        style=regime_style,
+    )
+    regime_text.append(f"\nPrice Change: {regime.price_change_pct:+.1f}%")
+    regime_text.append(f"\nAvg Signal Score: {regime.avg_score:+.1f}")
+    regime_text.append(
+        f"\nBullish: {regime.bullish_periods_pct:.0f}% | Bearish: {regime.bearish_periods_pct:.0f}%"
+    )
+
+    console.print(
+        Panel(
+            regime_text,
+            title="[bold]Market Conditions[/bold]",
+            border_style="magenta",
+        )
+    )
+
+    # Strategy fit
+    fit_color = (
+        "green"
+        if analysis.strategy_fit_score >= 60
+        else "yellow" if analysis.strategy_fit_score >= 40 else "red"
+    )
+    console.print(
+        f"\n[bold]Strategy Fit Score:[/bold] [{fit_color}]{analysis.strategy_fit_score:.0f}/100[/{fit_color}]"
+    )
+    console.print(f"[dim]{analysis.strategy_fit_rationale}[/dim]")
+
+    # Issues
+    if analysis.issues:
+        console.print("\n[bold]⚠️ Issues Identified:[/bold]")
+        for issue in analysis.issues:
+            severity_styles = {
+                "critical": "bold red",
+                "warning": "yellow",
+                "info": "dim",
+            }
+            style = severity_styles.get(issue.severity, "white")
+            console.print(f"  [{style}]• {issue.message}[/{style}]")
+            if issue.suggestion:
+                console.print(f"    [dim]→ {issue.suggestion}[/dim]")
+
+    # Recommendations
+    if analysis.recommendations:
+        console.print("\n[bold]💡 Recommendations:[/bold]")
+        for i, rec in enumerate(analysis.recommendations[:3], 1):  # Top 3
+            console.print(f"\n  [cyan]{i}. {rec.action}[/cyan]")
+            console.print(f"     [dim]{rec.rationale}[/dim]")
+            if rec.cli_example:
+                console.print(f"     [green]$ {rec.cli_example}[/green]")
+
+
+@app.command()
+def chart(
+    symbol: str = typer.Argument("BTCUSDT", help="Symbol to chart (e.g., BTCUSDT)"),
+    timeframe: str = typer.Option("1d", "--timeframe", "-t", help="Timeframe"),
+    days: int = typer.Option(90, "--days", "-d", help="Number of days to display"),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Save chart to file (PNG)"
+    ),
+    no_show: bool = typer.Option(
+        False, "--no-show", help="Don't display chart (use with --output)"
+    ),
+    multi: bool = typer.Option(
+        False, "--multi", "-m", help="Show multi-timeframe comparison (1h, 4h, 1d)"
+    ),
+):
+    """Display price chart with signal score heatmap.
+
+    Shows a visual representation of price action colored by signal strength:
+    - Green = bullish signals (positive scores)
+    - Red = bearish signals (negative scores)
+
+    Examples:
+
+        # Show BTC daily chart for 90 days
+        chart BTCUSDT -t 1d -d 90
+
+        # Save chart to file
+        chart BTCUSDT -t 4h -d 30 --output charts/btc_signals.png
+
+        # Multi-timeframe comparison
+        chart BTCUSDT --multi -d 30
+    """
+    from pathlib import Path
+    from .charts import create_signal_heatmap, create_multi_timeframe_heatmap
+
+    output_path = Path(output) if output else None
+
+    with console.status(f"Generating chart for {symbol}..."):
+        try:
+            if multi:
+                create_multi_timeframe_heatmap(
+                    symbol=symbol,
+                    timeframes=["1h", "4h", "1d"],
+                    days=days,
+                    output_path=output_path,
+                    show=not no_show,
+                )
+            else:
+                create_signal_heatmap(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    days=days,
+                    output_path=output_path,
+                    show=not no_show,
+                )
+
+            if output_path:
+                console.print(f"[green]Chart saved to {output_path}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]Error generating chart: {e}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command()

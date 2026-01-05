@@ -11,7 +11,7 @@ timeframes:
   - 1d
 
 # Number of candles to fetch for analysis
-lookback_periods: 200
+lookback_periods: 730
 
 # Technical indicator settings
 indicators:
@@ -40,6 +40,39 @@ signal_weights:
   bollinger: 0.25
   ema: 0.25
 
+# Multi-source aggregation weights
+# These control how technical, on-chain, and other signals are combined
+aggregation:
+  # Default weights (used when regime detection is disabled)
+  default:
+    technical: 0.6
+    onchain: 0.3
+    fundamental: 0.05
+    supply: 0.05
+    sentiment: 0.0
+
+  # Regime-specific weights (used when regime detection is enabled)
+  bull:
+    technical: 0.5
+    onchain: 0.25
+    fundamental: 0.1
+    supply: 0.1
+    sentiment: 0.05
+
+  bear:
+    technical: 0.4
+    onchain: 0.35 # On-chain more important to spot accumulation
+    fundamental: 0.1
+    supply: 0.1
+    sentiment: 0.05
+
+  sideways:
+    technical: 0.6 # Mean reversion works well in ranges
+    onchain: 0.2
+    fundamental: 0.1
+    supply: 0.05
+    sentiment: 0.05
+
 # Alert thresholds
 alerts:
   # Only alert when score exceeds these values
@@ -64,17 +97,17 @@ notifications:
 backtest:
   # Default capital and position sizing
   initial_capital: 10000.0
-  position_size: 1.0  # Fraction of capital per trade (0.0 to 1.0)
-  fee_rate: 0.001     # Trading fee as decimal (0.001 = 0.1%)
+  position_size: 1.0 # Fraction of capital per trade (0.0 to 1.0)
+  fee_rate: 0.001 # Trading fee as decimal (0.001 = 0.1%)
 
   # Default trading mode: "long_only", "short_only", or "bidirectional"
   mode: "bidirectional"
 
   # Signal score thresholds
-  long_entry_score: 60.0    # Enter long when score >= this (STRONG_BUY)
-  short_entry_score: -60.0  # Enter short when score <= this (STRONG_SELL)
-  long_exit_score: -60.0    # Exit long when score <= this
-  short_exit_score: 60.0    # Exit short when score >= this
+  long_entry_score: 60.0 # Enter long when score >= this (STRONG_BUY)
+  short_entry_score: -60.0 # Enter short when score <= this (STRONG_SELL)
+  long_exit_score: -60.0 # Exit long when score <= this
+  short_exit_score: 60.0 # Exit short when score >= this
 
   # Alternative exit mode: exit on any opposite signal
   exit_on_opposite: false
@@ -82,7 +115,7 @@ backtest:
   # Default preset (if not specified via CLI)
   # Available: long_strong_signals, short_strong_signals, bidirectional_strong,
   #            trend_following, mean_reversion
-  default_strategy: null  # null means use custom config above
+  default_strategy: null # null means use custom config above
 
 # Cache settings
 cache:

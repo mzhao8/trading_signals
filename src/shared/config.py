@@ -125,6 +125,31 @@ class BacktestConfig(BaseModel):
     default_strategy: Optional[str] = None
 
 
+class SourceWeightConfig(BaseModel):
+    """Weights for different signal sources."""
+
+    technical: float = 0.6
+    onchain: float = 0.3
+    fundamental: float = 0.05
+    supply: float = 0.05
+    sentiment: float = 0.0
+
+
+class AggregationConfig(BaseModel):
+    """Multi-source aggregation configuration with regime-based weights."""
+
+    default: SourceWeightConfig = Field(default_factory=SourceWeightConfig)
+    bull: SourceWeightConfig = Field(default_factory=lambda: SourceWeightConfig(
+        technical=0.5, onchain=0.25, fundamental=0.1, supply=0.1, sentiment=0.05
+    ))
+    bear: SourceWeightConfig = Field(default_factory=lambda: SourceWeightConfig(
+        technical=0.4, onchain=0.35, fundamental=0.1, supply=0.1, sentiment=0.05
+    ))
+    sideways: SourceWeightConfig = Field(default_factory=lambda: SourceWeightConfig(
+        technical=0.6, onchain=0.2, fundamental=0.1, supply=0.05, sentiment=0.05
+    ))
+
+
 class Config(BaseSettings):
     """Main application configuration."""
 
@@ -141,6 +166,7 @@ class Config(BaseSettings):
     cache: CacheConfig = Field(default_factory=CacheConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
+    aggregation: AggregationConfig = Field(default_factory=AggregationConfig)
 
 
 def load_config(config_path: Optional[Path] = None) -> Config:
