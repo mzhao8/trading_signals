@@ -12,7 +12,7 @@ from rich.text import Text
 
 from src.data.cache import DataCache
 from src.data.fetcher import CCXTFetcher
-from src.research.backtest import Backtester
+from src.research.backtest import Backtester, STRATEGY_PRESETS
 from src.research.reports import generate_backtest_report
 from src.research.signals import generate_signals
 from src.shared.config import get_config, load_config
@@ -317,17 +317,112 @@ def watch(
 
 @app.command()
 def backtest(
-    symbol: str = typer.Argument(..., help="Symbol to backtest (e.g., BTCUSDT)"),
+    symbol: Optional[str] = typer.Argument(
+        None, help="Symbol to backtest (e.g., BTCUSDT)"
+    ),
     timeframe: str = typer.Option("1d", "--timeframe", "-t", help="Timeframe"),
     days: int = typer.Option(365, "--days", "-d", help="Number of days to backtest"),
     output: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output file for report (markdown)"
     ),
+    # Strategy options
+    strategy: Optional[str] = typer.Option(
+        None,
+        "--strategy",
+        "-S",
+        help="Use a pre-built strategy preset (see --list-strategies)",
+    ),
+    list_strategies: bool = typer.Option(
+        False, "--list-strategies", help="List available strategy presets and exit"
+    ),
+    compare: Optional[str] = typer.Option(
+        None,
+        "--compare",
+        help="Compare multiple strategies (comma-separated preset names)",
+    ),
+    # Custom configuration
+    mode: Optional[str] = typer.Option(
+        None, "--mode", "-m", help="Trading mode: long_only, short_only, bidirectional"
+    ),
+    long_entry: Optional[float] = typer.Option(
+        None, "--long-entry", help="Score threshold to enter long position"
+    ),
+    long_exit: Optional[float] = typer.Option(
+        None, "--long-exit", help="Score threshold to exit long position"
+    ),
+    short_entry: Optional[float] = typer.Option(
+        None, "--short-entry", help="Score threshold to enter short position"
+    ),
+    short_exit: Optional[float] = typer.Option(
+        None, "--short-exit", help="Score threshold to exit short position"
+    ),
+    exit_on_opposite: bool = typer.Option(
+        False, "--exit-opposite", help="Exit on any opposite signal"
+    ),
 ):
-    """Run backtest on historical data."""
-    from datetime import timedelta
+    """Run backtest on historical data.
+
+    Examples:
+
+        # Use a preset strategy
+        backtest BTCUSDT --strategy long_strong_signals
+
+        # Custom configuration
+        backtest BTCUSDT --mode long_only --long-entry 60 --long-exit -60
+
+        # Compare strategies
+        backtest BTCUSDT --compare long_strong_signals,trend_following
+    """
     from pathlib import Path
 
+    # Handle --list-strategies
+    if list_strategies:
+        _show_strategy_presets()
+        return
+
+    # Handle --compare
+    if compare:
+        if not symbol:
+            console.print("[red]Error: Symbol required for comparison[/red]")
+            raise typer.Exit(1)
+        _compare_strategies(symbol, timeframe, days, compare.split(","))
+        return
+
+    # Normal backtest - symbol is required
+    if not symbol:
+        console.print("[red]Error: Symbol argument required[/red]")
+        console.print("Usage: backtest BTCUSDT [OPTIONS]")
+        console.print("Use --list-strategies to see available presets")
+        raise typer.Exit(1)
+
+    # Create backtester
+    if strategy:
+        # Use preset
+        try:
+            backtester = Backtester.from_preset(strategy)
+            console.print(f"[cyan]Using strategy preset: {strategy}[/cyan]")
+        except ValueError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        # Build custom config
+        kwargs = {}
+        if mode:
+            kwargs["mode"] = mode
+        if long_entry is not None:
+            kwargs["long_entry_score"] = long_entry
+        if long_exit is not None:
+            kwargs["long_exit_score"] = long_exit
+        if short_entry is not None:
+            kwargs["short_entry_score"] = short_entry
+        if short_exit is not None:
+            kwargs["short_exit_score"] = short_exit
+        if exit_on_opposite:
+            kwargs["exit_on_opposite"] = True
+
+        backtester = Backtester(**kwargs)
+
+    # Fetch data
     with CCXTFetcher() as fetcher:
         with console.status(f"Fetching {days} days of {symbol} {timeframe} data..."):
             # Estimate candles needed
@@ -344,17 +439,132 @@ def backtest(
 
     console.print(f"[green]Fetched {len(df)} candles[/green]")
 
+    # Run backtest
     with console.status("Running backtest..."):
-        backtester = Backtester()
         result = backtester.run(df, symbol, timeframe)
 
     # Print summary
-    summary_table = Table(title=f"Backtest Results: {symbol}", show_header=True)
+    _print_backtest_result(result)
+
+    if output:
+        output_path = Path(output)
+        generate_backtest_report(result, output_path)
+        console.print(f"\n[green]Report saved to {output_path}[/green]")
+
+
+def _show_strategy_presets():
+    """Display available strategy presets."""
+    table = Table(title="Available Strategy Presets", show_header=True)
+    table.add_column("Name", style="bold cyan")
+    table.add_column("Description")
+    table.add_column("Mode")
+    table.add_column("Entry", justify="right")
+    table.add_column("Exit", justify="right")
+
+    for name, config in STRATEGY_PRESETS.items():
+        mode = config.get("mode", "bidirectional")
+        description = config.get("description", "")
+
+        if mode == "long_only":
+            entry = f">= {config.get('long_entry_score', 60)}"
+            exit_val = f"<= {config.get('long_exit_score', -60)}"
+        elif mode == "short_only":
+            entry = f"<= {config.get('short_entry_score', -60)}"
+            exit_val = f">= {config.get('short_exit_score', 60)}"
+        else:
+            long_entry = config.get("long_entry_score", 60)
+            short_entry = config.get("short_entry_score", -60)
+            entry = f"L>={long_entry}, S<={short_entry}"
+            if config.get("exit_on_opposite"):
+                exit_val = "opposite signal"
+            else:
+                exit_val = f"L<={config.get('long_exit_score', 0)}, S>={config.get('short_exit_score', 0)}"
+
+        table.add_row(name, description, mode, entry, exit_val)
+
+    console.print(table)
+    console.print("\n[dim]Usage: backtest BTCUSDT --strategy <preset_name>[/dim]")
+
+
+def _compare_strategies(symbol: str, timeframe: str, days: int, strategies: list[str]):
+    """Compare multiple strategies side by side."""
+    # Validate strategies
+    for s in strategies:
+        if s not in STRATEGY_PRESETS:
+            console.print(f"[red]Error: Unknown strategy '{s}'[/red]")
+            console.print(f"Available: {', '.join(STRATEGY_PRESETS.keys())}")
+            raise typer.Exit(1)
+
+    # Fetch data once
+    with CCXTFetcher() as fetcher:
+        with console.status(f"Fetching {days} days of {symbol} {timeframe} data..."):
+            if timeframe == "1d":
+                limit = days
+            elif timeframe == "4h":
+                limit = days * 6
+            elif timeframe == "1h":
+                limit = days * 24
+            else:
+                limit = min(days * 24, 1000)
+
+            df = fetcher.fetch_dataframe(symbol, timeframe, limit=limit)
+
+    console.print(f"[green]Fetched {len(df)} candles[/green]\n")
+
+    # Run backtests
+    results = []
+    for strategy_name in strategies:
+        with console.status(f"Testing {strategy_name}..."):
+            backtester = Backtester.from_preset(strategy_name)
+            result = backtester.run(df, symbol, timeframe)
+            results.append(result)
+
+    # Create comparison table
+    table = Table(
+        title=f"Strategy Comparison: {symbol} ({timeframe}, {days} days)",
+        show_header=True,
+    )
+    table.add_column("Metric")
+    for s in strategies:
+        table.add_column(s, justify="right")
+
+    metrics = [
+        ("Total Return", lambda r: f"{r.total_return:+.2f}%"),
+        ("Total Trades", lambda r: str(r.total_trades)),
+        ("Win Rate", lambda r: f"{r.win_rate:.1f}%"),
+        ("Profit Factor", lambda r: f"{r.profit_factor:.2f}"),
+        ("Max Drawdown", lambda r: f"{r.max_drawdown:.2f}%"),
+        ("Sharpe Ratio", lambda r: f"{r.sharpe_ratio():.2f}"),
+        ("Final Capital", lambda r: f"${r.final_capital:,.0f}"),
+    ]
+
+    for metric_name, metric_fn in metrics:
+        values = [metric_fn(r) for r in results]
+        # Highlight best value for return and Sharpe
+        if metric_name in ("Total Return", "Sharpe Ratio"):
+            numeric_vals = [r.total_return if metric_name == "Total Return" else r.sharpe_ratio() for r in results]
+            best_idx = numeric_vals.index(max(numeric_vals))
+            values[best_idx] = f"[bold green]{values[best_idx]}[/bold green]"
+        table.add_row(metric_name, *values)
+
+    console.print(table)
+
+
+def _print_backtest_result(result):
+    """Print backtest result summary table."""
+    title = f"Backtest Results: {result.symbol}"
+    if result.strategy_name != "custom":
+        title += f" ({result.strategy_name})"
+
+    summary_table = Table(title=title, show_header=True)
     summary_table.add_column("Metric")
     summary_table.add_column("Value", justify="right")
 
     return_style = "green" if result.total_return > 0 else "red"
 
+    summary_table.add_row(
+        "Strategy", result.strategy_name
+    )
     summary_table.add_row(
         "Period", f"{result.start_date.date()} to {result.end_date.date()}"
     )
@@ -371,11 +581,6 @@ def backtest(
     summary_table.add_row("Sharpe Ratio", f"{result.sharpe_ratio():.2f}")
 
     console.print(summary_table)
-
-    if output:
-        output_path = Path(output)
-        report = generate_backtest_report(result, output_path)
-        console.print(f"\n[green]Report saved to {output_path}[/green]")
 
 
 @app.command()

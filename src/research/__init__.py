@@ -2,7 +2,7 @@
 
 from .indicators import calculate_indicators, get_latest_indicators
 from .signals import generate_signals, generate_signal, SignalResult
-from .backtest import Backtester, BacktestResult
+from .backtest import Backtester, BacktestResult, STRATEGY_PRESETS, TradingMode
 from .reports import generate_backtest_report
 from .sentiment import SentimentAnalyzer, get_symbol_sentiment, SentimentResult
 
@@ -14,6 +14,8 @@ __all__ = [
     "SignalResult",
     "Backtester",
     "BacktestResult",
+    "STRATEGY_PRESETS",
+    "TradingMode",
     "generate_backtest_report",
     "SentimentAnalyzer",
     "get_symbol_sentiment",

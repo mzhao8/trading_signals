@@ -60,6 +60,30 @@ notifications:
     bot_token: ""
     chat_id: ""
 
+# Backtesting settings
+backtest:
+  # Default capital and position sizing
+  initial_capital: 10000.0
+  position_size: 1.0  # Fraction of capital per trade (0.0 to 1.0)
+  fee_rate: 0.001     # Trading fee as decimal (0.001 = 0.1%)
+
+  # Default trading mode: "long_only", "short_only", or "bidirectional"
+  mode: "bidirectional"
+
+  # Signal score thresholds
+  long_entry_score: 60.0    # Enter long when score >= this (STRONG_BUY)
+  short_entry_score: -60.0  # Enter short when score <= this (STRONG_SELL)
+  long_exit_score: -60.0    # Exit long when score <= this
+  short_exit_score: 60.0    # Exit short when score >= this
+
+  # Alternative exit mode: exit on any opposite signal
+  exit_on_opposite: false
+
+  # Default preset (if not specified via CLI)
+  # Available: long_strong_signals, short_strong_signals, bidirectional_strong,
+  #            trend_following, mean_reversion
+  default_strategy: null  # null means use custom config above
+
 # Cache settings
 cache:
   enabled: true

@@ -107,6 +107,24 @@ class APIConfig(BaseModel):
     binance: BinanceAPIConfig = Field(default_factory=BinanceAPIConfig)
 
 
+class BacktestConfig(BaseModel):
+    """Backtesting configuration."""
+
+    initial_capital: float = 10000.0
+    position_size: float = 1.0
+    fee_rate: float = 0.001
+
+    mode: str = "bidirectional"
+
+    long_entry_score: float = 60.0
+    short_entry_score: float = -60.0
+    long_exit_score: float = -60.0
+    short_exit_score: float = 60.0
+
+    exit_on_opposite: bool = False
+    default_strategy: Optional[str] = None
+
+
 class Config(BaseSettings):
     """Main application configuration."""
 
@@ -122,6 +140,7 @@ class Config(BaseSettings):
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     api: APIConfig = Field(default_factory=APIConfig)
+    backtest: BacktestConfig = Field(default_factory=BacktestConfig)
 
 
 def load_config(config_path: Optional[Path] = None) -> Config:

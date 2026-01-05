@@ -111,7 +111,65 @@ python -m src.product.cli watch -s BTCUSDT -s ETHUSDT --interval 300
 
 ### Run Backtest
 
-Test your strategy against historical data:
+Test your strategy against historical data. The backtester supports both pre-built strategy presets and fully custom configurations.
+
+#### Using Strategy Presets
+
+```bash
+# List available strategies
+python -m src.product.cli backtest --list-strategies
+
+# Use a preset strategy
+python -m src.product.cli backtest BTCUSDT --strategy long_strong_signals -t 1d -d 365
+python -m src.product.cli backtest BTCUSDT --strategy trend_following -t 4h -d 90
+```
+
+**Available Presets:**
+
+| Preset                 | Description                                   | Mode          | Entry            | Exit            |
+| ---------------------- | --------------------------------------------- | ------------- | ---------------- | --------------- |
+| `long_strong_signals`  | Long only on STRONG_BUY, exit on STRONG_SELL  | long_only     | score >= 60      | score <= -60    |
+| `short_strong_signals` | Short only on STRONG_SELL, exit on STRONG_BUY | short_only    | score <= -60     | score >= 60     |
+| `bidirectional_strong` | Both directions, strong signals only          | bidirectional | abs(score) >= 60 | opposite strong |
+| `trend_following`      | Enter on any buy/sell, hold until opposite    | bidirectional | abs(score) >= 20 | opposite signal |
+| `mean_reversion`       | Enter on extreme signals, exit at neutral     | bidirectional | abs(score) >= 80 | score crosses 0 |
+
+#### Custom Configuration
+
+```bash
+# Long-only strategy with custom thresholds
+python -m src.product.cli backtest BTCUSDT --mode long_only --long-entry 50 --long-exit -40
+
+# Bidirectional with exit on any opposite signal
+python -m src.product.cli backtest BTCUSDT --mode bidirectional --long-entry 40 --exit-opposite
+```
+
+#### Compare Strategies
+
+Compare multiple strategies side-by-side:
+
+```bash
+python -m src.product.cli backtest BTCUSDT --compare long_strong_signals,trend_following,mean_reversion -t 1d -d 180
+```
+
+**Output:**
+
+```
+      Strategy Comparison: BTCUSDT (1d, 180 days)
+┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Metric        ┃ long_strong_signals ┃ trend_following ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ Total Return  │              +0.00% │          +2.45% │
+│ Total Trades  │                   0 │               2 │
+│ Win Rate      │                0.0% │           50.0% │
+│ Profit Factor │                0.00 │            1.27 │
+│ Max Drawdown  │               0.00% │           9.21% │
+│ Sharpe Ratio  │                0.00 │            1.85 │
+│ Final Capital │             $10,000 │         $10,245 │
+└───────────────┴─────────────────────┴─────────────────┘
+```
+
+#### Basic Backtest
 
 ```bash
 # Backtest BTC on daily timeframe for 1 year
@@ -125,9 +183,11 @@ python -m src.product.cli backtest BTCUSDT -t 1d -d 365 --output reports/btc_bac
 
 ```
            Backtest Results: BTCUSDT
+            (long_strong_signals)
 ┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Metric          ┃               Value ┃
 ┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ Strategy        │  long_strong_signals│
 │ Period          │ 2025-01-01 to ...   │
 │ Initial Capital │          $10,000.00 │
 │ Final Capital   │          $12,450.00 │
@@ -160,6 +220,8 @@ python -m src.product.cli config-show
 
 ### Options Reference
 
+**General Options:**
+
 | Option        | Short | Description                                    |
 | ------------- | ----- | ---------------------------------------------- |
 | `--symbol`    | `-s`  | Trading pair (e.g., BTCUSDT, ETH/USDT)         |
@@ -168,6 +230,20 @@ python -m src.product.cli config-show
 | `--days`      | `-d`  | Number of days to backtest                     |
 | `--output`    | `-o`  | Output file path for reports                   |
 | `--json`      | `-j`  | Output as JSON                                 |
+
+**Backtest Options:**
+
+| Option              | Short | Description                                              |
+| ------------------- | ----- | -------------------------------------------------------- |
+| `--strategy`        | `-S`  | Use a pre-built strategy preset                          |
+| `--list-strategies` |       | List available strategy presets                          |
+| `--compare`         |       | Compare multiple strategies (comma-separated)            |
+| `--mode`            | `-m`  | Trading mode: long_only, short_only, bidirectional       |
+| `--long-entry`      |       | Score threshold to enter long position                   |
+| `--long-exit`       |       | Score threshold to exit long position                    |
+| `--short-entry`     |       | Score threshold to enter short position                  |
+| `--short-exit`      |       | Score threshold to exit short position                   |
+| `--exit-opposite`   |       | Exit on any opposite signal instead of waiting threshold |
 
 ## Signal Interpretation
 
