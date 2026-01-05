@@ -110,6 +110,8 @@ class APIConfig(BaseModel):
 class Config(BaseSettings):
     """Main application configuration."""
 
+    model_config = {"env_prefix": "TRADING_"}
+
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT"])
     timeframes: list[str] = Field(default_factory=lambda: ["4h", "1d"])
     lookback_periods: int = 200
@@ -120,9 +122,6 @@ class Config(BaseSettings):
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     api: APIConfig = Field(default_factory=APIConfig)
-
-    class Config:
-        env_prefix = "TRADING_"
 
 
 def load_config(config_path: Optional[Path] = None) -> Config:
@@ -163,4 +162,3 @@ def get_config() -> Config:
     if _config is None:
         _config = load_config()
     return _config
-

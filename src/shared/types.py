@@ -34,6 +34,8 @@ class SignalDirection(str, Enum):
 class OHLCV(BaseModel):
     """Single candlestick data point."""
 
+    model_config = {"frozen": True}
+
     timestamp: datetime
     open: float
     high: float
@@ -41,38 +43,47 @@ class OHLCV(BaseModel):
     close: float
     volume: float
 
-    class Config:
-        frozen = True
-
 
 class IndicatorValues(BaseModel):
     """Container for all calculated indicator values."""
 
     # RSI
     rsi: Optional[float] = None
-    rsi_signal: Optional[float] = Field(None, description="RSI contribution to score (-100 to 100)")
+    rsi_signal: Optional[float] = Field(
+        None, description="RSI contribution to score (-100 to 100)"
+    )
 
     # MACD
     macd: Optional[float] = None
     macd_signal: Optional[float] = None
     macd_histogram: Optional[float] = None
-    macd_score: Optional[float] = Field(None, description="MACD contribution to score (-100 to 100)")
+    macd_score: Optional[float] = Field(
+        None, description="MACD contribution to score (-100 to 100)"
+    )
 
     # Bollinger Bands
     bb_upper: Optional[float] = None
     bb_middle: Optional[float] = None
     bb_lower: Optional[float] = None
-    bb_percent: Optional[float] = Field(None, description="Price position within bands (0-1)")
-    bb_score: Optional[float] = Field(None, description="Bollinger contribution to score (-100 to 100)")
+    bb_percent: Optional[float] = Field(
+        None, description="Price position within bands (0-1)"
+    )
+    bb_score: Optional[float] = Field(
+        None, description="Bollinger contribution to score (-100 to 100)"
+    )
 
     # EMA
     ema_fast: Optional[float] = None
     ema_slow: Optional[float] = None
-    ema_score: Optional[float] = Field(None, description="EMA contribution to score (-100 to 100)")
+    ema_score: Optional[float] = Field(
+        None, description="EMA contribution to score (-100 to 100)"
+    )
 
 
 class Signal(BaseModel):
     """Trading signal output."""
+
+    model_config = {"frozen": True}
 
     symbol: str
     timeframe: str
@@ -83,9 +94,6 @@ class Signal(BaseModel):
     price: float
     confidence: float = Field(default=1.0, ge=0, le=1)
 
-    class Config:
-        frozen = True
-
 
 class SignalResult(BaseModel):
     """Result of signal generation for a single symbol/timeframe."""
@@ -95,4 +103,3 @@ class SignalResult(BaseModel):
     signal: Signal
     raw_data_points: int = Field(..., description="Number of candles used")
     calculation_time_ms: float = Field(..., description="Time taken to calculate")
-

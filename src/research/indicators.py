@@ -33,6 +33,10 @@ def calculate_rsi(
 
     rsi = ta.rsi(df["close"], length=period)
 
+    # Handle case where pandas-ta returns None for insufficient data
+    if rsi is None:
+        rsi = pd.Series([float("nan")] * len(df), index=df.index)
+
     # Convert RSI to signal score
     # RSI < oversold = bullish (positive score)
     # RSI > overbought = bearish (negative score)
@@ -83,6 +87,11 @@ def calculate_macd(
 
     macd_result = ta.macd(df["close"], fast=fast, slow=slow, signal=signal_period)
 
+    # Handle case where pandas-ta returns None for insufficient data
+    if macd_result is None:
+        nan_series = pd.Series([float("nan")] * len(df), index=df.index)
+        return nan_series, nan_series, nan_series, nan_series
+
     macd_line = macd_result.iloc[:, 0]  # MACD line
     signal_line = macd_result.iloc[:, 1]  # Signal line
     histogram = macd_result.iloc[:, 2]  # Histogram
@@ -124,6 +133,11 @@ def calculate_bollinger(
     std_dev = std_dev or config.indicators.bollinger.std_dev
 
     bb_result = ta.bbands(df["close"], length=period, std=std_dev)
+
+    # Handle case where pandas-ta returns None for insufficient data
+    if bb_result is None:
+        nan_series = pd.Series([float("nan")] * len(df), index=df.index)
+        return nan_series, nan_series, nan_series, nan_series, nan_series
 
     lower = bb_result.iloc[:, 0]  # Lower band
     middle = bb_result.iloc[:, 1]  # Middle band
@@ -179,6 +193,11 @@ def calculate_ema_crossover(
 
     ema_fast = ta.ema(df["close"], length=fast)
     ema_slow = ta.ema(df["close"], length=slow)
+
+    # Handle case where pandas-ta returns None for insufficient data
+    if ema_fast is None or ema_slow is None:
+        nan_series = pd.Series([float("nan")] * len(df), index=df.index)
+        return nan_series, nan_series, nan_series
 
     # Score based on EMA relationship and momentum
     # Fast > Slow = bullish

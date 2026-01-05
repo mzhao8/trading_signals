@@ -69,5 +69,6 @@ cache:
 # API settings
 api:
   binance:
-    base_url: "https://api.binance.com"
+    # Use Binance.US if regular Binance is geo-blocked
+    base_url: "https://api.binance.us"
     rate_limit_per_minute: 1200

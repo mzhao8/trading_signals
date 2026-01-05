@@ -11,7 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from src.data.cache import DataCache
-from src.data.fetcher import BinanceFetcher
+from src.data.fetcher import CCXTFetcher
 from src.research.backtest import Backtester
 from src.research.reports import generate_backtest_report
 from src.research.signals import generate_signals
@@ -81,7 +81,7 @@ def signals(
     symbols = symbol if symbol else config.symbols
     timeframes = timeframe if timeframe else config.timeframes
 
-    with BinanceFetcher() as fetcher:
+    with CCXTFetcher() as fetcher:
         cache = DataCache()
 
         results = []
@@ -138,7 +138,9 @@ def signals(
 
     for r in results:
         sig = r.signal
-        direction_text = Text(sig.direction.value, style=get_direction_style(sig.direction))
+        direction_text = Text(
+            sig.direction.value, style=get_direction_style(sig.direction)
+        )
         score_text = Text(f"{sig.score:+.1f}", style=get_score_color(sig.score))
 
         rsi_val = f"{sig.indicators.rsi:.1f}" if sig.indicators.rsi else "N/A"
@@ -156,18 +158,22 @@ def signals(
         )
 
     console.print(table)
-    console.print(f"\n[dim]Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/dim]")
+    console.print(
+        f"\n[dim]Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/dim]"
+    )
 
 
 @app.command()
 def detail(
     symbol: str = typer.Argument(..., help="Symbol to analyze (e.g., BTCUSDT)"),
-    timeframe: str = typer.Option("4h", "--timeframe", "-t", help="Timeframe to analyze"),
+    timeframe: str = typer.Option(
+        "4h", "--timeframe", "-t", help="Timeframe to analyze"
+    ),
 ):
     """Get detailed signal analysis for a single symbol."""
     config = get_config()
 
-    with BinanceFetcher() as fetcher:
+    with CCXTFetcher() as fetcher:
         cache = DataCache()
 
         with console.status(f"Analyzing {symbol} {timeframe}..."):
@@ -180,7 +186,7 @@ def detail(
 
     # Print indicator details
     ind = result.signal.indicators
-    
+
     indicator_table = Table(title="Indicator Details", show_header=True)
     indicator_table.add_column("Indicator")
     indicator_table.add_column("Value", justify="right")
@@ -189,7 +195,9 @@ def detail(
 
     # RSI
     if ind.rsi is not None:
-        rsi_interp = "Oversold" if ind.rsi < 30 else "Overbought" if ind.rsi > 70 else "Neutral"
+        rsi_interp = (
+            "Oversold" if ind.rsi < 30 else "Overbought" if ind.rsi > 70 else "Neutral"
+        )
         indicator_table.add_row(
             "RSI (14)",
             f"{ind.rsi:.1f}",
@@ -199,7 +207,9 @@ def detail(
 
     # MACD
     if ind.macd is not None:
-        macd_interp = "Bullish" if ind.macd_histogram and ind.macd_histogram > 0 else "Bearish"
+        macd_interp = (
+            "Bullish" if ind.macd_histogram and ind.macd_histogram > 0 else "Bearish"
+        )
         indicator_table.add_row(
             "MACD",
             f"{ind.macd:.4f}",
@@ -209,7 +219,11 @@ def detail(
 
     # Bollinger
     if ind.bb_percent is not None:
-        bb_interp = "Oversold" if ind.bb_percent < 0.2 else "Overbought" if ind.bb_percent > 0.8 else "Neutral"
+        bb_interp = (
+            "Oversold"
+            if ind.bb_percent < 0.2
+            else "Overbought" if ind.bb_percent > 0.8 else "Neutral"
+        )
         indicator_table.add_row(
             "Bollinger %B",
             f"{ind.bb_percent:.2f}",
@@ -232,11 +246,11 @@ def detail(
 
 @app.command()
 def watch(
-    symbol: list[str] = typer.Option(
-        None, "--symbol", "-s", help="Symbol(s) to watch"
-    ),
+    symbol: list[str] = typer.Option(None, "--symbol", "-s", help="Symbol(s) to watch"),
     timeframe: str = typer.Option("4h", "--timeframe", "-t", help="Timeframe"),
-    interval: int = typer.Option(60, "--interval", "-i", help="Refresh interval in seconds"),
+    interval: int = typer.Option(
+        60, "--interval", "-i", help="Refresh interval in seconds"
+    ),
 ):
     """Watch signals in real-time with auto-refresh."""
     import time
@@ -245,11 +259,13 @@ def watch(
     symbols = symbol if symbol else config.symbols
 
     console.print(f"[bold]Watching {', '.join(symbols)} on {timeframe}[/bold]")
-    console.print(f"[dim]Refreshing every {interval} seconds. Press Ctrl+C to stop.[/dim]\n")
+    console.print(
+        f"[dim]Refreshing every {interval} seconds. Press Ctrl+C to stop.[/dim]\n"
+    )
 
     try:
         while True:
-            with BinanceFetcher() as fetcher:
+            with CCXTFetcher() as fetcher:
                 cache = DataCache()
 
                 table = Table(show_header=True, header_style="bold cyan")
@@ -263,14 +279,19 @@ def watch(
                     try:
                         # Force fresh fetch by invalidating cache
                         cache.invalidate(sym, timeframe)
-                        df = cache.get_or_fetch(fetcher, sym, timeframe, config.lookback_periods)
+                        df = cache.get_or_fetch(
+                            fetcher, sym, timeframe, config.lookback_periods
+                        )
                         result = generate_signals(df, sym, timeframe)
                         sig = result.signal
 
                         direction_text = Text(
-                            sig.direction.value, style=get_direction_style(sig.direction)
+                            sig.direction.value,
+                            style=get_direction_style(sig.direction),
                         )
-                        score_text = Text(f"{sig.score:+.1f}", style=get_score_color(sig.score))
+                        score_text = Text(
+                            f"{sig.score:+.1f}", style=get_score_color(sig.score)
+                        )
 
                         table.add_row(
                             sym,
@@ -284,7 +305,9 @@ def watch(
 
                 console.clear()
                 console.print(table)
-                console.print(f"\n[dim]Next refresh in {interval}s. Ctrl+C to stop.[/dim]")
+                console.print(
+                    f"\n[dim]Next refresh in {interval}s. Ctrl+C to stop.[/dim]"
+                )
 
             time.sleep(interval)
 
@@ -305,7 +328,7 @@ def backtest(
     from datetime import timedelta
     from pathlib import Path
 
-    with BinanceFetcher() as fetcher:
+    with CCXTFetcher() as fetcher:
         with console.status(f"Fetching {days} days of {symbol} {timeframe} data..."):
             # Estimate candles needed
             if timeframe == "1d":
@@ -332,7 +355,9 @@ def backtest(
 
     return_style = "green" if result.total_return > 0 else "red"
 
-    summary_table.add_row("Period", f"{result.start_date.date()} to {result.end_date.date()}")
+    summary_table.add_row(
+        "Period", f"{result.start_date.date()} to {result.end_date.date()}"
+    )
     summary_table.add_row("Initial Capital", f"${result.initial_capital:,.2f}")
     summary_table.add_row("Final Capital", f"${result.final_capital:,.2f}")
     summary_table.add_row(
@@ -358,8 +383,9 @@ def config_show():
     """Show current configuration."""
     config = get_config()
 
-    console.print(Panel.fit(
-        f"""[bold]Trading Signals Configuration[/bold]
+    console.print(
+        Panel.fit(
+            f"""[bold]Trading Signals Configuration[/bold]
 
 [cyan]Symbols:[/cyan] {', '.join(config.symbols)}
 [cyan]Timeframes:[/cyan] {', '.join(config.timeframes)}
@@ -381,8 +407,9 @@ def config_show():
   Strong Buy Threshold: {config.alerts.strong_buy_threshold}
   Strong Sell Threshold: {config.alerts.strong_sell_threshold}
 """,
-        title="config.yaml",
-    ))
+            title="config.yaml",
+        )
+    )
 
 
 def main():
@@ -392,4 +419,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
